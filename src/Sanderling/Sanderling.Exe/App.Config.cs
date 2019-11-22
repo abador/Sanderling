@@ -1,9 +1,8 @@
 ﻿using Bib3;
 using BotEngine.Common;
-using Sanderling.Log;
+using BotSharp.UI.Wpf;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Sanderling.Exe
@@ -12,8 +11,6 @@ namespace Sanderling.Exe
 	{
 		string LicenseKeyStoreFilePath => AssemblyDirectoryPath.PathToFilesysChild(@"license.key");
 
-		ISingleValueStore<string> LicenseKeyStore;
-
 		static public string ConfigFilePath =>
 			AssemblyDirectoryPath.PathToFilesysChild("config");
 
@@ -21,12 +18,12 @@ namespace Sanderling.Exe
 
 		string DefaultScriptPath => ScriptDirectoryPath.PathToFilesysChild("default.cs");
 
-		KeyValuePair<string, string>[] ListScriptIncluded =
+		static KeyValuePair<string, byte[]>[] IncludedDemoBots =
 			SetScriptIncludedConstruct()?.ExceptionCatch(Bib3.FCL.GBS.Extension.MessageBoxException)
 			?.OrderBy(scriptNameAndContent => !scriptNameAndContent.Key.RegexMatchSuccessIgnoreCase("travel"))
 			?.ToArray();
 
-		static IEnumerable<KeyValuePair<string, string>> SetScriptIncludedConstruct()
+		static IEnumerable<KeyValuePair<string, byte[]>> SetScriptIncludedConstruct()
 		{
 			var Assembly = typeof(App).Assembly;
 
@@ -41,13 +38,32 @@ namespace Sanderling.Exe
 				if (null == ScriptIdMatch)
 					continue;
 
-				var ScriptUTF8 = Assembly.GetManifestResourceStream(ResourceName)?.LeeseGesamt();
-
-				if (null == ScriptUTF8)
-					continue;
-
-				yield return new KeyValuePair<string, string>(ScriptIdMatch?.Groups?[1]?.Value, Encoding.UTF8.GetString(ScriptUTF8));
+				yield return new KeyValuePair<string, byte[]>(
+					ScriptIdMatch?.Groups?[1]?.Value,
+					Assembly.GetManifestResourceStream(ResourceName)?.LeeseGesamt());
 			}
+		}
+
+		static BotsNavigationConfiguration BotsNavigationConfiguration()
+		{
+			byte[] includedBotFromNameRegexPattern(string regexPattern) =>
+				IncludedDemoBots
+				.FirstOrDefault(includedScript => Regex.Match(includedScript.Key, regexPattern, RegexOptions.IgnoreCase).Success)
+				.Value;
+
+			var botsOfferedAtRoot = new[]
+			{
+				("Automate Mining Ore From Asteroids", includedBotFromNameRegexPattern(@"beginners-ore-asteroid-miner")),
+				("Automate Travel (Faster Autopilot)", includedBotFromNameRegexPattern(@"beginners-autopilot")),
+			}
+			.Where(descriptionAndBot => 0 < descriptionAndBot.Item2?.Length)
+			.ToList();
+
+			return new BotsNavigationConfiguration
+			{
+				RootContentFromDefaultBot = defaultBot => UI.BotsNavigation.NavigationRoot(botsOfferedAtRoot, defaultBot),
+				OfferedDemoBots = IncludedDemoBots,
+			};
 		}
 
 		static public ExeConfig ConfigDefaultConstruct() =>
@@ -55,25 +71,5 @@ namespace Sanderling.Exe
 			{
 				LicenseClient = ExeConfig.LicenseClientDefault,
 			};
-
-		void ConfigSetup()
-		{
-			LicenseKeyStore =
-				new SingleValueStoreCached<string>
-				{
-					BaseStore =
-						new SingleValueStoreRelayWithExceptionToDelegate<string>
-						{
-							BaseStore = new StringStoreToFilePath
-							{
-								FilePath = LicenseKeyStoreFilePath,
-							},
-
-							ExceptionDelegate = e => LogEntryWriteNow(new LogEntry { LicenseKeyStoreException = e }),
-						}
-				};
-
-			UI.Main.LicenseKeyStore = LicenseKeyStore;
-		}
 	}
 }

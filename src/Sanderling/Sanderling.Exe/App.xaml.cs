@@ -1,8 +1,7 @@
 ﻿using Bib3;
+using McMaster.Extensions.CommandLineUtils;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -10,17 +9,38 @@ namespace Sanderling.Exe
 {
 	public partial class App : Application
 	{
+		class CLI
+		{
+			static public CLI LastInstance;
+
+			[Option(Description = "Path to a file to load a bot from when the application starts.", ShortName = "")]
+			public string LoadBotFromFile { get; }
+
+			[Option(Description = "Start the loaded bot directly.", ShortName = "")]
+			public bool StartBot { get; }
+
+			[Option(Description = "How many times a bot should be restarted if it crashes.", ShortName = "")]
+			public int BotCrashRetryCountMax { get; }
+
+			public string ReportAllArguments() => Newtonsoft.Json.JsonConvert.SerializeObject(this);
+
+			private void OnExecute()
+			{
+				Console.WriteLine("CLI.OnExecute");
+
+				LastInstance = this;
+			}
+		}
+
 		static public Int64 GetTimeStopwatch() => Bib3.Glob.StopwatchZaitMiliSictInt();
 
 		public MainWindow Window => base.MainWindow as MainWindow;
 
-		Bib3.FCL.GBS.ToggleButtonHorizBinär ToggleButtonMotionEnable => Window?.Main?.ToggleButtonMotionEnable;
+		Bib3.FCL.GBS.ToggleButtonHorizBinär BotOperationPauseContinueToggleButton => Window?.Main?.ToggleButtonMotionEnable;
 
-		BotSharp.UI.Wpf.IDE ScriptIDE => Window?.Main?.Bot?.IDE;
+		UI.BotAPIExplorer BotAPIExplorer => Window?.Main?.DevToolsAPIExplorer;
 
-		UI.BotAPIExplorer BotAPIExplorer => Window?.Main?.Bot?.APIExplorer;
-
-		BotSharp.ScriptRun.ScriptRun ScriptRun => ScriptIDE?.ScriptRun;
+		BotSharp.ScriptRun.ScriptRun ScriptRun => MainControl?.BotsNavigation?.ScriptRun;
 
 		bool WasActivated = false;
 
@@ -30,13 +50,47 @@ namespace Sanderling.Exe
 
 		Sanderling.Script.Impl.HostToScript UIAPI;
 
+		protected override void OnStartup(StartupEventArgs e)
+		{
+			base.OnStartup(e);
+
+			WriteLogEntryWithTimeNow(new Log.LogEntry
+			{
+				Startup = new Log.StartupLogEntry
+				{
+					Args = e.Args,
+				}
+			});
+
+			Exception parseCommandsFromArgumentsException = null;
+
+			try
+			{
+				CommandLineApplication.Execute<CLI>(e.Args);
+			}
+			catch (Exception exception)
+			{
+				parseCommandsFromArgumentsException = exception;
+			}
+
+			WriteLogEntryWithTimeNow(new Log.LogEntry
+			{
+				ParseCommandsFromArguments = new Log.ParseCommandsFromArgumentsEntry
+				{
+					Arguments = CLI.LastInstance?.ReportAllArguments(),
+					Exception = parseCommandsFromArgumentsException,
+				}
+			});
+		}
+
 		public App()
 		{
 			AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
 
-			LogCreate();
+			AppDomain.CurrentDomain.UnhandledException += (object sender, UnhandledExceptionEventArgs e) =>
+				UnhandledException(sender, e.ExceptionObject as Exception);
 
-			ConfigSetup();
+			CreateLogFile();
 
 			UIAPI = new Sanderling.Script.Impl.HostToScript
 			{
@@ -90,38 +144,72 @@ namespace Sanderling.Exe
 				FromScriptRequestMemoryMeasurementEvaluation = FromScriptRequestMemoryMeasurementEvaluation,
 				FromScriptMotionExecute = FromScriptMotionExecute,
 				GetWindowHandleDelegate = () => Motor?.WindowHandle ?? IntPtr.Zero,
-                GetKillEveProcessAction = KillEveProcessAction
+				GetKillEveProcessAction = KillEveProcessAction,
+				ExecutionStatusChangedDelegate = ScriptExecutionStatusChanged,
 			};
 		}
 
 		void ActivatedFirstTime()
 		{
-			ScriptIDE.ScriptParamBase = new BotSharp.ScriptParam()
+			MainControl.BotsNavigation.ScriptParamBase = new BotSharp.ScriptParam
 			{
 				ImportAssembly = Script.ToScriptImport.ImportAssembly?.ToArray(),
 				ImportNamespace = Sanderling.Script.Impl.ToScriptImport.ImportNamespace?.ToArray(),
-				CompilationOption = new BotSharp.CodeAnalysis.CompilationOption()
-				{
-					InstrumentationOption = BotSharp.CodeAnalysis.InstrumentationOption.Default,
-				},
 
 				ScriptRunClientBuildDelegate = ScriptRunClientBuild,
 
 				CompilationGlobalsType = typeof(Sanderling.Script.ToScriptGlobals),
 			};
 
-			ScriptIDE.ChooseScriptFromIncludedScripts.SetScript =
-				ListScriptIncluded?.Select(scriptIdAndContent => new KeyValuePair<string, Func<string>>(scriptIdAndContent.Key, () => scriptIdAndContent.Value))?.ToArray();
-
-			ScriptIDE.ScriptWriteToOrReadFromFile.DefaultFilePath = DefaultScriptPath;
-			ScriptIDE.ScriptWriteToOrReadFromFile?.ReadFromFile();
-			if (!(0 < ScriptIDE.Editor.Document.Text?.Length))
-				ScriptIDE.Editor.Document.Text = ListScriptIncluded?.FirstOrDefault().Value ?? "";
+			MainControl.BotsNavigation.Configuration = BotsNavigationConfiguration();
 
 			Window.KeyDown += Window_KeyDown;
 			Window?.AddHandler(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, new RoutedEventHandler(ButtonClicked));
 
 			TimerConstruct();
+
+			Dispatcher.Invoke(ExecuteCommandsFromArguments);
+		}
+
+		void ExecuteCommandsFromArguments()
+		{
+			Exception exception = null;
+
+			string argumentsReport = null;
+
+			try
+			{
+				var arguments = CLI.LastInstance;
+
+				argumentsReport = arguments?.ReportAllArguments();
+
+				var botsNavigation = MainControl.BotsNavigation;
+
+				var botFileName = arguments?.LoadBotFromFile;
+
+				var bot = 0 < botFileName?.Length ? System.IO.File.ReadAllBytes(botFileName) : null;
+
+				if (bot != null)
+				{
+					if (arguments.StartBot)
+						botsNavigation.NavigateIntoOperateBot(bot, true);
+					else
+						botsNavigation.NavigateIntoPreviewBot(bot);
+				}
+			}
+			catch (Exception e)
+			{
+				exception = e;
+			}
+
+			WriteLogEntryWithTimeNow(new Log.LogEntry
+			{
+				ExecuteCommandsFromArguments = new Log.ExecuteCommandsFromArgumentsEntry
+				{
+					Arguments = argumentsReport,
+					Exception = exception,
+				},
+			});
 		}
 
 		void Timer_Tick(object sender, object e)
@@ -132,76 +220,102 @@ namespace Sanderling.Exe
 
 			InterfaceExchange();
 
-			UIPresentScript();
+			UpdateBotOperationPauseContinueToggleButton();
 
 			UIPresent();
 		}
 
-		void ButtonClicked(object sender, RoutedEventArgs e)
+		enum StartOrContinueBotTrigger
 		{
-			var OriginalSource = e?.OriginalSource;
+			UserInterface,
+			RetryAfterFail,
+		}
 
-			if (null != OriginalSource)
+		int RetryAfterBotFailCount = 0;
+
+		void ContinueOrStartBotOperation(StartOrContinueBotTrigger trigger)
+		{
+			if (trigger == StartOrContinueBotTrigger.UserInterface)
+				RetryAfterBotFailCount = 0;
+			else
+				++RetryAfterBotFailCount;
+
+			WriteLogEntryWithTimeNow(
+				new Log.LogEntry
+				{
+					ContinueOrStartBotOperation = new Log.ContinueOrStartBotOperationLogEntry
+					{
+						Trigger = trigger.ToString(),
+					}
+				});
+
+			MainControl?.BotsNavigation?.ContinueOrStartBotOperation();
+			UpdateBotOperationPauseContinueToggleButton();
+		}
+
+		void PauseBotOperation()
+		{
+			MainControl?.BotsNavigation?.PauseBotOperation();
+			UpdateBotOperationPauseContinueToggleButton();
+		}
+
+		private void KillEveProcessAction()
+		{
+			Current.Dispatcher.Invoke(() =>
 			{
-				if (Equals(OriginalSource, ToggleButtonMotionEnable?.ButtonLinx))
-				{
-					ScriptRunPause();
-				}
+				if (!EveOnlineClientProcessId.HasValue)
+					return;
 
-				if (Equals(OriginalSource, ToggleButtonMotionEnable?.ButtonRecz))
+				var process = System.Diagnostics.Process.GetProcessById(EveOnlineClientProcessId.Value);
+
+				process.Kill();
+			});
+		}
+
+		void ScriptExecutionStatusChanged(
+			Sanderling.Script.Impl.ScriptRunClient scriptRunClient,
+			BotSharp.ScriptRun.ScriptRun scriptRun)
+		{
+			if (scriptRun.Status == BotSharp.ScriptRun.ScriptRunExecutionStatus.Failed)
+			{
+				if (RetryAfterBotFailCount < CLI.LastInstance.BotCrashRetryCountMax)
 				{
-					ScriptRunPlay();
+					System.Threading.Tasks.Task.Run(() =>
+					{
+						System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(1)).Wait();
+
+						Dispatcher.BeginInvoke(
+							new Action(() => ContinueOrStartBotOperation(StartOrContinueBotTrigger.RetryAfterFail)));
+					});
 				}
 			}
 		}
 
-		void ScriptRunPlay()
+		private void Application_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
 		{
-			ScriptIDE.ScriptRunContinueOrStart();
-
-			UIPresentScript();
+			UnhandledException(sender, e.Exception);
+			e.Handled = true;
 		}
 
-		void ScriptRunPause()
-		{
-			ScriptIDE.ScriptPause();
+		static int UnhandledExceptionCount = 0;
 
-			UIPresentScript();
-		}
-
-        private void KillEveProcessAction()
-        {
-            Current.Dispatcher.Invoke(() =>
-            {
-                if (!EveOnlineClientProcessId.HasValue)
-                    return;
-
-                var process = System.Diagnostics.Process.GetProcessById(EveOnlineClientProcessId.Value);
-
-                process.Kill();
-            });
-        }
-
-        private void Application_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+		void UnhandledException(object sender, Exception exception)
 		{
 			try
 			{
-				var FilePath = AssemblyDirectoryPath.PathToFilesysChild(DateTime.Now.SictwaiseKalenderString(".", 0) + " Exception");
+				var exceptionIndex = System.Threading.Interlocked.Increment(ref UnhandledExceptionCount);
 
-				FilePath.WriteToFileAndCreateDirectoryIfNotExisting(Encoding.UTF8.GetBytes(e.Exception.SictString()));
+				var filePath = AssemblyDirectoryPath.PathToFilesysChild(
+					"[" + DateTime.UtcNow.ToString("yyyy-MM-ddTHH-mm-ss.fff") + "][" + exceptionIndex + "].Exception");
 
-				var Message = "exception written to file: " + FilePath;
-
-				MessageBox.Show(Message, Message, MessageBoxButton.OK, MessageBoxImage.Exclamation);
+				filePath.WriteToFileAndCreateDirectoryIfNotExisting(System.Text.Encoding.UTF8.GetBytes(exception.SictString()));
 			}
-			catch (Exception PersistException)
+			catch (Exception persistException)
 			{
-				Bib3.FCL.GBS.Extension.MessageBoxException(PersistException);
+				Bib3.FCL.GBS.Extension.MessageBoxException(persistException);
 			}
 
-			Bib3.FCL.GBS.Extension.MessageBoxException(e.Exception);
-
-			e.Handled = true;
+			Bib3.FCL.GBS.Extension.MessageBoxException(exception);
 		}
 	}
 }

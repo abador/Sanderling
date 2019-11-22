@@ -68,11 +68,11 @@
     </Reference>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
-    <Reference Include="Sanderling.Interface">
-      <HintPath>..\..\..\lib.intermediate\Sanderling.Interface.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.ValueTuple, Version=4.0.3.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.ValueTuple.4.5.0\lib\net461\System.ValueTuple.dll</HintPath>
+    </Reference>
     <Reference Include="System.Xaml" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -87,13 +87,14 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ApiTreeView.cs" />
-    <Compile Include="Bot.xaml.cs">
-      <DependentUpon>Bot.xaml</DependentUpon>
+    <Compile Include="..\CommonAssemblyInfo.cs">
+      <Link>Properties\CommonAssemblyInfo.cs</Link>
     </Compile>
+    <Compile Include="ApiTreeView.cs" />
     <Compile Include="BotAPIExplorer.xaml.cs">
       <DependentUpon>BotAPIExplorer.xaml</DependentUpon>
     </Compile>
+    <Compile Include="BotsNavigation.cs" />
     <Compile Include="Extension.cs" />
     <Compile Include="InterfaceToEve.xaml.cs">
       <DependentUpon>InterfaceToEve.xaml</DependentUpon>
@@ -107,10 +108,6 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Page Include="Bot.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
     <Page Include="BotAPIExplorer.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
@@ -133,14 +130,22 @@
     </Resource>
   </ItemGroup>
   <ItemGroup>
+    <None Include="app.config">
+      <SubType>Designer</SubType>
+    </None>
+    <None Include="packages.config">
+      <SubType>Designer</SubType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sanderling.Interface\Sanderling.Interface.csproj">
+      <Project>{41ece926-3577-4774-8902-e7ba721dcc09}</Project>
+      <Name>Sanderling.Interface</Name>
+    </ProjectReference>
     <ProjectReference Include="..\Sanderling\Sanderling.csproj">
       <Project>{36f1710c-532f-47fd-88e2-5fafb381121c}</Project>
       <Name>Sanderling</Name>
     </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="app.config" />
-    <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
